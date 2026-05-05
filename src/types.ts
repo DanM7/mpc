@@ -18,6 +18,7 @@ export interface Pattern {
   name: string
   bpm: number
   gridSize: number
+  gridRows?: number
   pads: Pad[]
   createdAt: string
   updatedAt: string
@@ -26,7 +27,11 @@ export interface Pattern {
 export interface AppState {
   // Grid
   gridSize: number
+  gridRows: number
   setGridSize: (size: number) => void
+  addGridRow: () => void
+  deleteGridRow: (rowIndex: number) => void
+  moveGridRow: (fromRow: number, toRow: number) => void
   
   // Pads
   pads: Pad[]
@@ -57,6 +62,9 @@ export interface AppState {
   // Sequencer
   sequencerSteps: number
   setSequencerSteps: (steps: number) => void
+  addSequencerStep: () => void
+  deleteSequencerStep: (stepIndex: number) => void
+  moveSequencerStep: (fromIndex: number, toIndex: number) => void
   currentStep: number
   isPlaying: boolean
   isRecording: boolean

@@ -109,8 +109,14 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   onChange={(e) => setSequencerSteps(Number(e.target.value))}
                   className="w-full bg-gray-800 text-white p-3 rounded-lg"
                 >
-                  <option value={8}>8 Steps</option>
-                  <option value={16}>16 Steps</option>
+                  {Array.from({ length: 16 }, (_, index) => {
+                    const steps = index + 1
+                    return (
+                      <option key={`steps-option-${steps}`} value={steps}>
+                        {steps} Step{steps > 1 ? 's' : ''}
+                      </option>
+                    )
+                  })}
                 </select>
               </div>
 

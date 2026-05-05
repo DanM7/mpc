@@ -36,7 +36,7 @@ const DEFAULT_PACK = DEFAULT_SOUND_PACKS[1] ?? DEFAULT_SOUND_PACKS[0]
 
 const players: Map<string, Tone.Player> = new Map()
 const playerUrls: Map<string, string> = new Map()
-const DEFAULT_SEQUENCER_STEPS = 16
+const DEFAULT_SEQUENCER_STEPS = 8
 let sequencerEventId: number | null = null
 let pendingRecording: string[][] | null = null
 let recordingStartStep: number | null = null
@@ -123,10 +123,81 @@ function cloneRecording(recording: string[][]): string[][] {
   return recording.map((step) => [...step])
 }
 
+function disposeCachedPlayers() {
+  players.forEach((player) => player.dispose())
+  players.clear()
+  playerUrls.clear()
+}
+
+const MAX_SEQUENCER_STEPS = 16
+
+function resetPendingRecordingSession() {
+  pendingRecording = null
+  recordingStartStep = null
+  playbackStepCursor = null
+}
+
+function reorderPadRows(pads: Pad[], columns: number, fromRow: number, toRow: number): Pad[] {
+  if (columns <= 0) return pads
+  const maxRows = Math.floor(pads.length / columns)
+  if (maxRows <= 1) return pads
+  const safeFrom = Math.max(0, Math.min(fromRow, maxRows - 1))
+  const safeTo = Math.max(0, Math.min(toRow, maxRows - 1))
+  if (safeFrom === safeTo) return pads
+
+  const rowChunks: Pad[][] = Array.from({ length: maxRows }, (_, rowIndex) =>
+    pads.slice(rowIndex * columns, rowIndex * columns + columns),
+  )
+  const [moved] = rowChunks.splice(safeFrom, 1)
+  if (!moved) return pads
+  rowChunks.splice(safeTo, 0, moved)
+
+  const flattenedRows = rowChunks.flat()
+  const remainder = pads.slice(maxRows * columns)
+  return [...flattenedRows, ...remainder]
+}
+
 export const useStore = create<AppState>((set, get) => ({
   // Grid
   gridSize: 3,
-  setGridSize: (size) => set({ gridSize: size }),
+  gridRows: 3,
+  setGridSize: (size) =>
+    set((state) => {
+      const safeSize = Math.max(1, size)
+      const maxRows = Math.max(1, Math.floor(state.pads.length / safeSize))
+      return {
+        gridSize: safeSize,
+        gridRows: Math.min(state.gridRows, maxRows),
+      }
+    }),
+  addGridRow: () =>
+    set((state) => {
+      const maxRows = Math.max(1, Math.floor(state.pads.length / state.gridSize))
+      return { gridRows: Math.min(maxRows, state.gridRows + 1) }
+    }),
+  deleteGridRow: (rowIndex) =>
+    set((state) => {
+      if (state.gridRows <= 1) return {}
+      const safeRowIndex = Math.max(0, Math.min(rowIndex, state.gridRows - 1))
+      const nextPads = reorderPadRows(state.pads, state.gridSize, safeRowIndex, state.gridRows - 1)
+      return {
+        pads: nextPads,
+        gridRows: state.gridRows - 1,
+      }
+    }),
+  moveGridRow: (fromRow, toRow) =>
+    set((state) => {
+      const maxRows = Math.min(
+        state.gridRows,
+        Math.max(1, Math.floor(state.pads.length / state.gridSize)),
+      )
+      if (maxRows <= 1) return {}
+      const safeFrom = Math.max(0, Math.min(fromRow, maxRows - 1))
+      const safeTo = Math.max(0, Math.min(toRow, maxRows - 1))
+      if (safeFrom === safeTo) return {}
+      const nextPads = reorderPadRows(state.pads, state.gridSize, safeFrom, safeTo)
+      return { pads: nextPads }
+    }),
 
   // Pads
   pads: DEFAULT_PADS,
@@ -145,9 +216,7 @@ export const useStore = create<AppState>((set, get) => ({
   loadSoundPack: (pack) =>
     set((state) => {
       // Invalidate cached players so changed pad URLs always play the selected pack.
-      players.forEach((player) => player.dispose())
-      players.clear()
-      playerUrls.clear()
+      disposeCachedPlayers()
       return {
         pads: state.pads.map((pad, i) => ({
           ...pad,
@@ -161,12 +230,13 @@ export const useStore = create<AppState>((set, get) => ({
   // Patterns
   patterns: [],
   savePattern: (name) => {
-    const { pads, bpm, gridSize } = get()
+    const { pads, bpm, gridSize, gridRows } = get()
     const pattern: Pattern = {
       id: `pattern-${Date.now()}`,
       name,
       bpm,
       gridSize,
+      gridRows,
       pads: [...pads],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -176,7 +246,13 @@ export const useStore = create<AppState>((set, get) => ({
   loadPattern: (id) => {
     const pattern = get().patterns.find((p) => p.id === id)
     if (pattern) {
-      set({ pads: pattern.pads, bpm: pattern.bpm, gridSize: pattern.gridSize })
+      const maxRows = Math.max(1, Math.floor(pattern.pads.length / pattern.gridSize))
+      set({
+        pads: pattern.pads,
+        bpm: pattern.bpm,
+        gridSize: pattern.gridSize,
+        gridRows: Math.min(pattern.gridRows ?? pattern.gridSize, maxRows),
+      })
     }
   },
   deletePattern: (id) =>
@@ -186,8 +262,22 @@ export const useStore = create<AppState>((set, get) => ({
   audioInitialized: false,
   initAudio: async () => {
     await Tone.start()
+    const transport = Tone.getTransport()
+    transport.stop()
+    transport.position = 0
+    sequencerEventId = null
+    pendingRecording = null
+    recordingStartStep = null
+    playbackStepCursor = null
+    disposeCachedPlayers()
     Tone.getTransport().bpm.value = get().bpm
-    set({ audioInitialized: true })
+    set((state) => ({
+      audioInitialized: true,
+      isPlaying: false,
+      isRecording: false,
+      currentStep: 0,
+      recordedPadsByStep: createEmptyRecording(state.sequencerSteps),
+    }))
   },
   playSound: async (padId) => {
     const pad = get().pads.find((p) => p.id === padId)
@@ -216,6 +306,11 @@ export const useStore = create<AppState>((set, get) => ({
           playerUrls.set(padId, pad.soundUrl)
         } catch {
           player.dispose()
+          set((state) => ({
+            recordedPadsByStep: state.recordedPadsByStep.map((stepPads) =>
+              stepPads.filter((recordedPadId) => recordedPadId !== padId),
+            ),
+          }))
           fallbackSynth.triggerAttackRelease(getFallbackNote(padId), '8n')
           return
         }
@@ -276,10 +371,8 @@ export const useStore = create<AppState>((set, get) => ({
   // Sequencer
   sequencerSteps: DEFAULT_SEQUENCER_STEPS,
   setSequencerSteps: (steps) => {
-    const safeSteps = Math.max(1, steps)
-    pendingRecording = null
-    recordingStartStep = null
-    playbackStepCursor = null
+    const safeSteps = Math.max(1, Math.min(steps, MAX_SEQUENCER_STEPS))
+    resetPendingRecordingSession()
     set({
       sequencerSteps: safeSteps,
       currentStep: 0,
@@ -287,6 +380,70 @@ export const useStore = create<AppState>((set, get) => ({
       recordedPadsByStep: createEmptyRecording(safeSteps),
     })
   },
+  addSequencerStep: () =>
+    set((state) => {
+      if (state.sequencerSteps >= MAX_SEQUENCER_STEPS) return {}
+      resetPendingRecordingSession()
+      return {
+        sequencerSteps: state.sequencerSteps + 1,
+        recordedPadsByStep: [...cloneRecording(state.recordedPadsByStep), []],
+        isRecording: false,
+      }
+    }),
+  deleteSequencerStep: (stepIndex) =>
+    set((state) => {
+      if (state.sequencerSteps <= 1) return {}
+      const idx = Math.max(0, Math.min(stepIndex, state.sequencerSteps - 1))
+      resetPendingRecordingSession()
+      const nextRecorded = cloneRecording(state.recordedPadsByStep)
+      nextRecorded.splice(idx, 1)
+      let nextCurrent = state.currentStep
+      if (idx < nextCurrent) {
+        nextCurrent -= 1
+      } else if (idx === nextCurrent) {
+        nextCurrent = Math.min(nextCurrent, nextRecorded.length - 1)
+      }
+      nextCurrent = Math.max(0, Math.min(nextCurrent, nextRecorded.length - 1))
+      return {
+        sequencerSteps: state.sequencerSteps - 1,
+        recordedPadsByStep: nextRecorded,
+        currentStep: nextCurrent,
+        isRecording: false,
+      }
+    }),
+  moveSequencerStep: (fromIndex, toIndex) =>
+    set((state) => {
+      const n = state.sequencerSteps
+      if (n <= 1) return {}
+      const safeFrom = Math.max(0, Math.min(fromIndex, n - 1))
+      const safeTo = Math.max(0, Math.min(toIndex, n - 1))
+      if (safeFrom === safeTo) return {}
+
+      resetPendingRecordingSession()
+
+      const nextRecorded = cloneRecording(state.recordedPadsByStep)
+      const [moved] = nextRecorded.splice(safeFrom, 1)
+      nextRecorded.splice(safeTo, 0, moved ?? [])
+
+      let nextCurrent = state.currentStep
+      if (nextCurrent === safeFrom) {
+        nextCurrent = safeTo
+      } else if (safeFrom < safeTo) {
+        if (nextCurrent > safeFrom && nextCurrent <= safeTo) {
+          nextCurrent -= 1
+        }
+      } else if (safeFrom > safeTo) {
+        if (nextCurrent >= safeTo && nextCurrent < safeFrom) {
+          nextCurrent += 1
+        }
+      }
+
+      return {
+        recordedPadsByStep: nextRecorded,
+        currentStep: nextCurrent,
+        isRecording: false,
+      }
+    }),
   currentStep: 0,
   isPlaying: false,
   isRecording: false,
@@ -377,6 +534,7 @@ export const useStore = create<AppState>((set, get) => ({
   resetRecording: () => {
     pendingRecording = null
     recordingStartStep = null
+    disposeCachedPlayers()
     set({
       isRecording: false,
       recordedPadsByStep: createEmptyRecording(get().sequencerSteps),

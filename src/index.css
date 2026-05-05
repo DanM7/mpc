@@ -18,8 +18,75 @@ html, body, #root {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #1a1a1a;
+  background:
+    radial-gradient(1200px 500px at 20% -10%, #51576055 0%, transparent 60%),
+    radial-gradient(1200px 500px at 100% 0%, #2f344055 0%, transparent 58%),
+    #16181d;
   color: #fff;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.mpc-shell {
+  background:
+    linear-gradient(170deg, rgba(70, 75, 83, 0.35), rgba(24, 26, 31, 0.7)),
+    linear-gradient(180deg, #2f333a, #1c1f25 55%, #16181d 100%);
+}
+
+.mpc-panel {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background:
+    linear-gradient(150deg, rgba(80, 86, 96, 0.24), rgba(18, 20, 25, 0.55)),
+    linear-gradient(180deg, rgba(42, 47, 55, 0.95), rgba(24, 27, 33, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+.mpc-btn {
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: linear-gradient(180deg, #4a4f58, #2f343d 56%, #252932);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(0, 0, 0, 0.45);
+  color: #e5e7eb;
+  transition: filter 120ms ease, transform 60ms ease;
+}
+
+.mpc-btn:hover {
+  filter: brightness(1.08);
+}
+
+.mpc-btn:active {
+  transform: translateY(1px);
+}
+
+.mpc-led-btn {
+  border-radius: 8px;
+  border: 1px solid rgba(103, 232, 249, 0.28);
+  background: linear-gradient(180deg, #2c3239, #1d222a);
+  color: #cbd5e1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: all 140ms ease;
+}
+
+.mpc-led-btn.is-on,
+.mpc-led-btn.is-rec {
+  color: #ecfeff;
+  border-color: rgba(34, 211, 238, 0.7);
+  background: linear-gradient(180deg, #0f3d46, #0a2730);
+  box-shadow: inset 0 1px 0 rgba(165, 243, 252, 0.28), 0 0 12px rgba(34, 211, 238, 0.45);
+}
+
+.mpc-led-btn.is-rec {
+  border-color: rgba(248, 113, 113, 0.72);
+  background: linear-gradient(180deg, #4f1d20, #321214);
+  box-shadow: inset 0 1px 0 rgba(252, 165, 165, 0.24), 0 0 12px rgba(248, 113, 113, 0.45);
 }
