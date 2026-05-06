@@ -24,6 +24,13 @@ export interface Pattern {
   updatedAt: string
 }
 
+/** One pad trigger on a sequencer step; undefined duration = play full sample (legacy default). */
+export interface StepHit {
+  padId: string
+  duration?: number
+  velocity?: number
+}
+
 export interface AppState {
   // Grid
   gridSize: number
@@ -55,8 +62,9 @@ export interface AppState {
   // Audio
   audioInitialized: boolean
   initAudio: () => Promise<void>
-  playSound: (padId: string) => Promise<void>
-  triggerPad: (padId: string) => Promise<void>
+  playSound: (padId: string, opts?: { durationSec?: number }) => Promise<void>
+  triggerPadPress: (padId: string, pointerId: number) => Promise<void>
+  triggerPadRelease: (padId: string, pointerId: number) => void
   setPadCustomSound: (padId: string, soundUrl: string, name: string) => void
   
   // Sequencer
@@ -68,7 +76,7 @@ export interface AppState {
   currentStep: number
   isPlaying: boolean
   isRecording: boolean
-  recordedPadsByStep: string[][]
+  recordedPadsByStep: StepHit[][]
   playSequencer: () => void
   pauseSequencer: () => void
   stopSequencer: () => void

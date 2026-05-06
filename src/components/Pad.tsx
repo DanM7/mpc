@@ -250,7 +250,8 @@ function formatMs(ms: number): string {
 }
 
 export default function Pad({ pad, editMode }: PadProps) {
-  const triggerPad = useStore((state) => state.triggerPad)
+  const triggerPadPress = useStore((state) => state.triggerPadPress)
+  const triggerPadRelease = useStore((state) => state.triggerPadRelease)
   const setPadCustomSound = useStore((state) => state.setPadCustomSound)
   const pads = useStore((state) => state.pads)
   const updatePad = useStore((state) => state.updatePad)
@@ -258,7 +259,10 @@ export default function Pad({ pad, editMode }: PadProps) {
   const recordedPadsByStep = useStore((state) => state.recordedPadsByStep)
 
   const assignedToCurrentStep = useMemo(
-    () => (recordedPadsByStep[currentStep] ?? []).includes(pad.id),
+    () =>
+      (recordedPadsByStep[currentStep] ?? []).some((hit) =>
+        typeof hit === 'string' ? hit === pad.id : hit.padId === pad.id,
+      ),
     [currentStep, pad.id, recordedPadsByStep],
   )
 
@@ -291,9 +295,6 @@ export default function Pad({ pad, editMode }: PadProps) {
     return `User FX ${nextIndex}`
   }, [pads])
 
-  const handlePress = useCallback(async () => {
-    await triggerPad(pad.id)
-  }, [pad.id, triggerPad])
 
   const replacePendingSoundUrl = useCallback((nextUrl: string) => {
     setPendingSoundUrl((prevUrl) => {
@@ -526,17 +527,20 @@ export default function Pad({ pad, editMode }: PadProps) {
     }
   }, [clearPendingSound, isRecording, stopMediaCapture, stopPreview])
 
-  const handlePointerUp = useCallback(async () => {
-    if (editMode) {
-      stopPreview()
-      clearPendingSound()
-      setCustomSoundName('')
-      openMenu()
-      return
-    }
+  const handlePointerUp = useCallback(
+    async (pointerId: number) => {
+      if (editMode) {
+        stopPreview()
+        clearPendingSound()
+        setCustomSoundName('')
+        openMenu()
+        return
+      }
 
-    await handlePress()
-  }, [clearPendingSound, editMode, handlePress, openMenu, stopPreview])
+      triggerPadRelease(pad.id, pointerId)
+    },
+    [clearPendingSound, editMode, openMenu, pad.id, stopPreview, triggerPadRelease],
+  )
 
   const handleChangeColor = useCallback(() => {
     const newColor = `hsl(${Math.random() * 360}, 70%, 50%)`
@@ -773,15 +777,25 @@ export default function Pad({ pad, editMode }: PadProps) {
     </div>
   ) : null
 
-  const handlePointerDownWithEvent = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) {
-      return
-    }
+  const handlePointerDownWithEvent = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) {
+        return
+      }
 
-    e.preventDefault()
-    setIsPressed(true)
-    e.currentTarget.style.transform = 'scale(0.95)'
-  }, [])
+      e.preventDefault()
+      setIsPressed(true)
+      if (!editMode) {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId)
+        } catch {
+          /* unsupported */
+        }
+        void triggerPadPress(pad.id, e.pointerId)
+      }
+    },
+    [editMode, pad.id, triggerPadPress],
+  )
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -799,7 +813,7 @@ export default function Pad({ pad, editMode }: PadProps) {
     borderRadius: '8px',
     aspectRatio: '1',
     cursor: 'pointer',
-    transition: 'transform 0.05s ease, box-shadow 0.12s ease, filter 0.12s ease',
+    transition: 'box-shadow 0.12s ease, filter 0.12s ease',
     display: 'flex',
     position: 'relative',
     alignItems: 'center',
@@ -838,17 +852,32 @@ export default function Pad({ pad, editMode }: PadProps) {
       onContextMenu={handleContextMenu}
       onPointerDown={handlePointerDownWithEvent}
       onPointerUp={async (e) => {
+        try {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId)
+          }
+        } catch {
+          /* ignore */
+        }
         setIsPressed(false)
-        e.currentTarget.style.transform = 'scale(1)'
-        await handlePointerUp()
+        await handlePointerUp(e.pointerId)
       }}
-      onPointerLeave={(e) => {
+      onPointerCancel={(e) => {
+        try {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId)
+          }
+        } catch {
+          /* ignore */
+        }
         setIsPressed(false)
-        e.currentTarget.style.transform = 'scale(1)'
+        if (!editMode) {
+          triggerPadRelease(pad.id, e.pointerId)
+        }
       }}
     >
       {modal ? createPortal(modal, document.body) : null}
-      <span className="relative z-[1]">{pad.name}</span>
+      <span className="pointer-events-none relative z-[1]">{pad.name}</span>
       {editMode ? (
         <span className="absolute bottom-1 right-1 rounded bg-cyan-950/80 px-1.5 py-0.5 text-[10px] font-bold text-cyan-200 border border-cyan-400/50">
           EDIT
